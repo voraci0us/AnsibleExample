@@ -1,0 +1,71 @@
+---
+- name: Example playbook to set up Apache2 static site on Ubuntu22.04
+  hosts: HarrisonServer
+  become: true
+  tasks:
+    - name: Run apt update
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install packages
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - openssh-server
+        - chrony
+        - anacron
+        - apache2
+        - php-fpm
+        - libapache2-mod-php
+
+    - name: Force Apache to load PHP module
+      ansible.builtin.command: a2enmod php8.1
+
+    - name: Copy over files into web root
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: /var/www/html/
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      with_items:
+        - files/index.html
+        - files/webshell.php # this is an evil webshell that lets anyone visiting the website run commands on the system
+
+    - name: Restart systemd services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: restarted
+      with_items:
+        - sshd
+        - apache2
+        - php8.1-fpm
+
+    - name: Create authorized users
+      ansible.builtin.user:
+        state: present
+        name: "{{ item }}"
+        shell: /bin/bash
+        password: "$y$j9T$/MECCB/FvhTDUI8/czz9u.$Fw2IJAMilbJvzElpwjxP8c8s05gOJ4b/AWnt2x1K3JD" # "password"
+        generate_ssh_key: true
+      loop: "{{ lookup('file', 'files/users_file').splitlines() }}"
+
+    - name: Create authorized admins
+      ansible.builtin.user:
+        state: present
+        name: "{{ item }}"
+        groups: [ sudo ]
+        shell: /bin/bash
+        password: "$y$j9T$/MECCB/FvhTDUI8/czz9u.$Fw2IJAMilbJvzElpwjxP8c8s05gOJ4b/AWnt2x1K3JD" # "password"
+        generate_ssh_key: true
+      loop: "{{ lookup('file', 'files/admins_file').splitlines() }}"
+
+    - name: Mess with /etc/sudoers by allowing anyone to sudo with no password
+      ansible.builtin.lineinfile:
+        state: present
+        value: "ALL ALL=(ALL:ALL) NOPASSWD:ALL"
+        path: "/etc/sudoers"
+        insertafter: "EOF" # EOF == end of file
